@@ -1,21 +1,23 @@
-from sklearn.svm import SVC
-from sklearn.linear_model import LogisticRegression
+from catboost import CatBoostClassifier
+from xgboost import XGBClassifier
+
 from sklearn.ensemble import (
-    RandomForestClassifier,
+    AdaBoostClassifier,
     ExtraTreesClassifier,
     GradientBoostingClassifier,
     HistGradientBoostingClassifier,
-    AdaBoostClassifier,
+    RandomForestClassifier,
 )
-from sklearn.tree import DecisionTreeClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.discriminant_analysis import (
+    LinearDiscriminantAnalysis,
+    QuadraticDiscriminantAnalysis,
+)
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.naive_bayes import GaussianNB
 from sklearn.neural_network import MLPClassifier
-
-from xgboost import XGBClassifier
-from catboost import CatBoostClassifier
-from sklearn.discriminant_analysis import QuadraticDiscriminantAnalysis
-from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
+from sklearn.svm import SVC
+from sklearn.tree import DecisionTreeClassifier
 
 
 _HYPERPARAM_DISTS = {
@@ -95,12 +97,18 @@ _HYPERPARAM_DISTS = {
     ],
 }
 
+
 def get_classifiers(seed=42):
     return [
         ("LDA", LinearDiscriminantAnalysis()),
         ("SVC", SVC(probability=True, random_state=seed)),
         ("LogisticRegression", LogisticRegression(max_iter=1000, random_state=seed)),
-        ("RandomForest", RandomForestClassifier(random_state=seed, class_weight="balanced_subsample")),
+        (
+            "RandomForest",
+            RandomForestClassifier(
+                random_state=seed, class_weight="balanced_subsample"
+            ),
+        ),
         ("ExtraTrees", ExtraTreesClassifier(random_state=seed)),
         ("GradientBoosting", GradientBoostingClassifier(random_state=seed)),
         ("HistGradientBoosting", HistGradientBoostingClassifier(random_state=seed)),
@@ -109,14 +117,22 @@ def get_classifiers(seed=42):
         ("GaussianNB", GaussianNB()),
         ("MLP", MLPClassifier(max_iter=800, random_state=seed)),
         ("AdaBoost", AdaBoostClassifier(algorithm="SAMME", random_state=seed)),
-        ("XGBoost", XGBClassifier(
-            eval_metric="logloss", verbosity=0, random_state=seed, tree_method="hist"
-        )),
-        ("CatBoost", CatBoostClassifier(
-            verbose=0, random_seed=seed, loss_function="Logloss"
-        )),
+        (
+            "XGBoost",
+            XGBClassifier(
+                eval_metric="logloss",
+                verbosity=0,
+                random_state=seed,
+                tree_method="hist",
+            ),
+        ),
+        (
+            "CatBoost",
+            CatBoostClassifier(verbose=0, random_seed=seed, loss_function="Logloss"),
+        ),
         ("QDA", QuadraticDiscriminantAnalysis()),
     ]
+
 
 def iter_model_specs(seed=42):
     name2est = dict(get_classifiers(seed=seed))

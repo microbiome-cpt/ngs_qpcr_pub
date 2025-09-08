@@ -10,12 +10,14 @@ from sklearn.pipeline import Pipeline as SkPipeline
 
 from imblearn.over_sampling import SMOTE
 
+
 class SafeSimpleImputer(SimpleImputer):
     def transform(self, X):
         try:
             return super().transform(X)
         except Exception:
             return X
+
 
 class SafeStandardScaler(StandardScaler):
     def transform(self, X):
@@ -24,12 +26,14 @@ class SafeStandardScaler(StandardScaler):
         except Exception:
             return X
 
+
 class SafeSMOTE(SMOTE):
     def fit_resample(self, X, y):
         try:
             return super().fit_resample(X, y)
         except Exception:
             return X, y
+
 
 def multiplicative_replacement(X, delta: float = 1e-6):
     X = np.asarray(X, dtype=float)
@@ -38,15 +42,14 @@ def multiplicative_replacement(X, delta: float = 1e-6):
     n, p = X.shape
     X_adj = X.copy()
 
-    zero_mask = (X_adj <= 0)
+    zero_mask = X_adj <= 0
     m = zero_mask.sum(axis=1, keepdims=True)
     non_zero_counts = p - m
 
     if delta > 0:
         X_adj[zero_mask] = float(delta)
 
-    comp = np.divide(delta * m,
-                     np.maximum(1.0, non_zero_counts))
+    comp = np.divide(delta * m, np.maximum(1.0, non_zero_counts))
     comp_full = np.repeat(comp, p, axis=1)
     mask_nz = ~zero_mask
     if mask_nz.any():
@@ -69,6 +72,7 @@ def clr_transform(X):
     gm = np.exp(np.mean(np.log(X), axis=1, keepdims=True))
     return np.log(X / gm)
 
+
 class MicrobiomeNormalizer(BaseEstimator, TransformerMixin):
     def __init__(self, mode="CLR", delta=1e-6):
         self.mode = mode
@@ -88,6 +92,7 @@ class MicrobiomeNormalizer(BaseEstimator, TransformerMixin):
             return clr_transform(multiplicative_replacement(Z, delta=self.delta))
         else:
             raise ValueError(f"Unknown norm mode for MicrobiomeNormalizer: {self.mode}")
+
 
 class DeicodeTransformer(BaseEstimator, TransformerMixin):
     def __init__(self, n_components=50, random_state=0):
@@ -112,7 +117,7 @@ class DeicodeTransformer(BaseEstimator, TransformerMixin):
         k = max(1, min(n_comp, n_samples - 1, n_features))
         self._svd = TruncatedSVD(n_components=k, random_state=rs)
         self._svd.fit(Xc)
-        self.loadings_ = getattr(self._svd, 'components_', None)
+        self.loadings_ = getattr(self._svd, "components_", None)
         self.last_k_ = int(k)
         return self
 
@@ -133,11 +138,12 @@ class DeicodeTransformer(BaseEstimator, TransformerMixin):
     def get_feature_names_out(self, input_features=None):
         k = int(self.last_k_ or self.n_components)
         return np.array([f"DEICODE_PC{i+1}" for i in range(k)])
-    
+
     def get_loadings(self):
         if getattr(self, "loadings_", None) is None:
             raise RuntimeError("Transformer not fitted")
         return self.loadings_
+
 
 class CLRRedundancyFilter(BaseEstimator, TransformerMixin):
     def __init__(self, corr_threshold=0.98, prefer="prevalence", delta=1e-6):
@@ -179,7 +185,7 @@ class CLRRedundancyFilter(BaseEstimator, TransformerMixin):
             groups.append(sorted(comp))
 
         prevalence = (X_df.values > 0).sum(axis=0)
-        variance   = X_df.values.var(axis=0)
+        variance = X_df.values.var(axis=0)
 
         keep_mask = np.zeros(n, dtype=bool)
         rep_idx = []
@@ -198,7 +204,6 @@ class CLRRedundancyFilter(BaseEstimator, TransformerMixin):
         self.groups_ = groups
         self.rep_idx_ = rep_idx
         return self
-
 
     def transform(self, X):
         X = np.asarray(X)
@@ -232,9 +237,17 @@ def build_preprocessor(
         mode = "CLR" if norm_up == "CLR" else "LOG10"
         micro_pipe = SkPipeline(
             steps=[
-                ("imputer", SafeSimpleImputer(strategy="constant", fill_value=0)),  # int 0
+                (
+                    "imputer",
+                    SafeSimpleImputer(strategy="constant", fill_value=0),
+                ),  # int 0
                 ("norm", MicrobiomeNormalizer(mode=mode)),
-                ("dedup", CLRRedundancyFilter(corr_threshold=float(corr_threshold), prefer=str(prefer))),
+                (
+                    "dedup",
+                    CLRRedundancyFilter(
+                        corr_threshold=float(corr_threshold), prefer=str(prefer)
+                    ),
+                ),
             ]
         )
 
