@@ -66,7 +66,7 @@ _HYPERPARAM_DISTS = {
     "MLP": {
         "model__hidden_layer_sizes": [(100,), (64, 64)],
         "model__alpha": [1e-4, 1e-3],
-        "model__max_iter": [500],
+        "model__max_iter": [800],
     },
     "AdaBoost": {
         "model__n_estimators": [200, 400],
@@ -90,7 +90,7 @@ _HYPERPARAM_DISTS = {
         "model__reg_param": [0.01, 0.1, 0.5],
     },
     "LDA": [
-        {"model__solver": ["svd"], "model__shrinkage": [None]},
+        {"model__solver": ["svd"]},
         {"model__solver": ["lsqr"], "model__shrinkage": [None, "auto"]},
     ],
 }
@@ -107,7 +107,7 @@ def get_classifiers(seed=42):
         ("KNN", KNeighborsClassifier()),
         ("DecisionTree", DecisionTreeClassifier(random_state=seed)),
         ("GaussianNB", GaussianNB()),
-        ("MLP", MLPClassifier(max_iter=500, random_state=seed)),
+        ("MLP", MLPClassifier(max_iter=800, random_state=seed)),
         ("AdaBoost", AdaBoostClassifier(algorithm="SAMME", random_state=seed)),
         ("XGBoost", XGBClassifier(
             eval_metric="logloss", verbosity=0, random_state=seed, tree_method="hist"

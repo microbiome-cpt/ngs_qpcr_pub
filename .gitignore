@@ -1,9 +1,4 @@
-# *.pyc
-# __pycache__/
-# .vscode/
-# .idea/
-# env/
-# .env
-# *.log
-# *.csv
-# .DS_Store
+*.pyc
+__pycache__/
+*.log
+*.csv

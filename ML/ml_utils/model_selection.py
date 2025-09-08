@@ -21,6 +21,20 @@ from ml_utils.importance_utils import (
     _mean_std_ci, _fmt,
 )
 from ml_utils.transforms import build_preprocessor
+import os
+from warnings import filterwarnings
+
+filterwarnings(
+    "ignore",
+    message=r".*Stochastic Optimizer: Maximum iterations.*",
+    category=UserWarning,
+    module=r"sklearn\.neural_network(\.|$)"
+)
+
+os.environ["PYTHONWARNINGS"] = (
+    "ignore:.*Stochastic Optimizer: Maximum iterations.*:UserWarning:sklearn.neural_network"
+)
+
 
 try:
     from catboost import CatBoostClassifier
@@ -187,6 +201,7 @@ def run_nested_cv_and_eval(
     oof_store: Dict[str, Any] = {}
 
     for name, estimator, param_grid in model_specs:
+        log(f"=== [{name}] start nested CV ===")
         oof_proba = (np.full(n_samples, np.nan, dtype=float) if n_classes_all == 2
                      else np.full((n_samples, n_classes_all), np.nan))
         oof_pred = np.full(n_samples, np.nan)
@@ -215,6 +230,7 @@ def run_nested_cv_and_eval(
 
             proba = est.predict_proba(X_va) if hasattr(est, "predict_proba") else None
             y_pred = est.predict(X_va)
+            y_pred = np.asarray(y_pred).ravel()
 
             try:
                 if proba is not None and proba.ndim == 2 and proba.shape[1] == n_classes_all and n_classes_all > 2:
