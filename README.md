@@ -5,12 +5,12 @@ This repository contains a pipeline for classification from a tabular data with 
 
 ## Table of Contents
 
--   [Environment](##environment)
--   [Repository Structure](##repository-structure)
--   [Input Data](##input-data)
--   [CLI arguments](##CLI-arguments)
--   [How to run](##How-to-run)
--   [Outputs](##outputs)
+-   [Environment](#environment)
+-   [Repository Structure](#repository-structure)
+-   [Input Data](#input-data)
+-   [CLI arguments](#cli-arguments)
+-   [How to run](#how-to-run)
+-   [Outputs](#outputs)
 
 ## Environment
 
@@ -78,7 +78,7 @@ python ngs_qpcr_pub/ML/model_selection.py \
   --data data.csv \
   --target-col Disease \
   --id-col Name \
-  --exclude-cols "Unnamed: 0" Method \
+  --exclude-cols Method \
   --norm CLR \
   --outer-folds 5 --inner-folds 3 \
   --seed 42 \
@@ -90,10 +90,10 @@ python ngs_qpcr_pub/ML/model_selection.py \
 ```
 export PYTHONPATH="ngs_qpcr_pub/ML:${PYTHONPATH}"
 python ngs_qpcr_pub/ML/model_selection.py \
-  --data df.ngs.rdp.csv df.ngs.silva.csv df.pcr.csv \
+  --data data.csv data2.csv data3.csv \
   --target-col Disease \
   --id-col Name \
-  --exclude-cols "Unnamed: 0" \
+  --exclude-cols Method \
   --norm DEICODE --deicode-components 50 \
   --outer-folds 5 --inner-folds 3 \
   --seed 42 \
