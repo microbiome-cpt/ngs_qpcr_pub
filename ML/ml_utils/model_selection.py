@@ -4,11 +4,10 @@ from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
-
 import argparse
+
 import numpy as np
 import pandas as pd
-import platform
 import scipy
 import sklearn
 from sklearn.model_selection import StratifiedGroupKFold, GridSearchCV, LeaveOneGroupOut
@@ -22,11 +21,6 @@ import imblearn
 from imblearn.pipeline import Pipeline as ImbPipeline
 
 try:
-    import shap as _shap
-except ImportError:
-    _shap = None
-
-try:
     from catboost import CatBoostClassifier
 except ImportError:
     CatBoostClassifier = None
@@ -35,6 +29,11 @@ try:
     from xgboost import XGBClassifier
 except ImportError:
     XGBClassifier = None
+
+try:
+    import shap as _shap
+except ImportError:
+    _shap = None
 
 from ml_utils.transforms import SafeSMOTE, build_preprocessor
 from ml_utils.io_utils import (
@@ -140,7 +139,7 @@ def build_model_specs(
 
 
 def tune_or_fit_inner(
-    _name: str, #unused
+    _name: str,  # unused
     estimator,
     param_grid: Dict[str, Any],
     X_tr: pd.DataFrame,
@@ -409,7 +408,6 @@ def run_nested_cv_and_eval(
     if not candidates:
         raise RuntimeError("No models trained; check data/params.")
 
-    # выбор лучшей модели по mean AUC (как в описании)
     best_name, best_trained, best_auc, best_acc, best_pr = max(
         candidates, key=lambda t: t[2]
     )
@@ -648,7 +646,6 @@ def posthoc_and_reporting(csv_path: Path, args, pack):
         f"pandas {pd.__version__}, "
         f"SHAP { getattr(_shap, '__version__', 'N/A') }."
     )
-
 
     md.append(
         "**Validation:** nested CV — outer 5-fold (unbiased, group-aware), inner 3-fold (GridSearchCV on outer-train, group-aware). "
