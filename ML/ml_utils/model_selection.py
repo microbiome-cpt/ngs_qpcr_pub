@@ -1,9 +1,9 @@
-import os
+import platform
+import json
 from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
-from warnings import filterwarnings
 
 import argparse
 import numpy as np
@@ -58,11 +58,13 @@ from ml_utils.importance_utils import (
 
 
 def log(msg: str):
+    """Print timestamped log message."""
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{ts}] {msg}")
 
 
 def make_pipe(pre, estimator, seed, use_smote=True):
+    """Build ML pipeline with preprocessing, optional SMOTE, and estimator."""
     steps = [("pre", pre)]
     if use_smote:
         steps.append(("smote", SafeSMOTE(random_state=seed)))
@@ -71,6 +73,7 @@ def make_pipe(pre, estimator, seed, use_smote=True):
 
 
 def per_class_and_macro(y_true, y_pred, n_classes: int) -> Dict[str, Any]:
+    """Compute per-class and macro-averaged precision, recall, F1."""
     P, R, F1, _ = precision_recall_fscore_support(
         y_true, y_pred, labels=list(range(n_classes)), zero_division=0
     )
@@ -137,7 +140,7 @@ def build_model_specs(
 
 
 def tune_or_fit_inner(
-    name: str,
+    _name: str, #unused
     estimator,
     param_grid: Dict[str, Any],
     X_tr: pd.DataFrame,
@@ -148,7 +151,7 @@ def tune_or_fit_inner(
     args,
     n_classes_tr: int,
 ):
-    """Внутренний 3-fold GridSearchCV на outer-train или fit без грида при малых данных."""
+    """Internal 3-fold GridSearchCV on outer-train."""
     estimator_adj = estimator
     param_grid_adj = deepcopy(param_grid) if param_grid else {}
 
@@ -207,6 +210,7 @@ def run_nested_cv_and_eval(
     args,
     model_specs: List[Tuple[str, Any, Dict[str, Any]]],
 ):
+    """Run nested cross-validation and return evaluation results."""
     y_ser = pd.Series(y)
     min_count = int(y_ser.value_counts().min())
     n_outer = min(args.outer_folds, max(2, min_count))
@@ -428,14 +432,13 @@ def run_nested_cv_and_eval(
 
 def posthoc_and_reporting(csv_path: Path, args, pack):
     """
-    Пост-хок интерпретация и финальная отчётность:
-      - финальный fit лучшей модели
-      - сохранение OOF и метрик
-      - (если DEICODE) loadings
-      - итоговые feature names, CPI/SHAP/native FI
-      - калибровка и ECE
-      - Leave-One-Out Accuracy по группам
-      - JSON + Markdown отчёты (с mean±SD [95% CI] по outer-folds)
+    Post-hoc interpretation and final reporting:
+    - final fit of the best model
+    - saving OOF and metrics
+    - (if DEICODE) loadings
+    - final feature names, SHAP
+    - Leave-One-Out Accuracy by groups
+    - JSON + Markdown reports (with mean±SD [95% CI] by outer-folds)
     """
     (
         df,
@@ -504,6 +507,7 @@ def posthoc_and_reporting(csv_path: Path, args, pack):
                 encoding="utf-8",
             ) as fh:
                 json.dump(best_oof.get("metrics", {}), fh, ensure_ascii=False, indent=2)
+
     except Exception as e:
         log(f"WARNING: failed to save OOF: {e}")
 
@@ -642,8 +646,9 @@ def posthoc_and_reporting(csv_path: Path, args, pack):
         f"Scipy {scipy.__version__}, "
         f"NumPy {np.__version__}, "
         f"pandas {pd.__version__}, "
-        f"SHAP { _shap_ver }."
+        f"SHAP { getattr(_shap, '__version__', 'N/A') }."
     )
+
 
     md.append(
         "**Validation:** nested CV — outer 5-fold (unbiased, group-aware), inner 3-fold (GridSearchCV on outer-train, group-aware). "
