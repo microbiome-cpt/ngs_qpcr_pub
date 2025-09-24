@@ -58,25 +58,22 @@ def ensure_sex_encoded(df):
         if cand in df.columns:
             sex_col = cand
             break
+    
     if "Sex_enc" not in df.columns and sex_col is not None:
+        sex_mapping = {
+            "male": 1, "m": 1, "м": 1, "муж": 1,
+            "female": 0, "f": 0, "ж": 0, "жен": 0,
+        }
+        
         s = (
-            pd.Series(df[sex_col])
+            df[sex_col]
             .astype(str)
             .str.lower()
-            .replace(
-                {
-                    "male": 1,
-                    "m": 1,
-                    "м": 1,
-                    "муж": 1,
-                    "female": 0,
-                    "f": 0,
-                    "ж": 0,
-                    "жен": 0,
-                }
-            )
+            .map(sex_mapping)
         )
+        
         df["Sex_enc"] = pd.to_numeric(s, errors="coerce").fillna(0).astype(int)
+    
     return df
 
 

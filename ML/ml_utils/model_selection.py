@@ -442,6 +442,8 @@ def posthoc_and_reporting(csv_path: Path, args, pack):
         df,
         y,
         groups,
+        classnames,
+        pre,
         norm,
         micro_cols,
         covs,
