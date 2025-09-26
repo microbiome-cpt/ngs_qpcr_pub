@@ -20,7 +20,7 @@ A requirements.txt is located in ngs_qpcr_pub/ML. Install it into a clean Python
 
 ``` bash
 # using conda + pip
-conda create -n micro-ml python=3.10 -y
+conda create -n micro-ml python=3.10 numpy=1.26.4 scipy=1.12.0 pandas=2.3.1 scikit-learn=1.4.2 -c conda-forge -y
 conda activate micro-ml
 pip install -r ngs_qpcr_pub/ML/requirements.txt
 ```
