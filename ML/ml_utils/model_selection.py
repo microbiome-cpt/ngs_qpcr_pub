@@ -1,3 +1,4 @@
+import os, inspect
 import platform
 import json
 from copy import deepcopy
@@ -10,6 +11,9 @@ import numpy as np
 import pandas as pd
 import scipy
 import sklearn
+from sklearn.discriminant_analysis import QuadraticDiscriminantAnalysis
+from sklearn.calibration import CalibratedClassifierCV
+from sklearn.decomposition import PCA
 from sklearn.model_selection import StratifiedGroupKFold, GridSearchCV, LeaveOneGroupOut
 from sklearn.metrics import (
     roc_auc_score, 
@@ -69,10 +73,12 @@ def log(msg: str):
 
 
 def make_pipe(pre, estimator, seed, use_smote=False):
-    """Build ML pipeline with preprocessing, optional SMOTE, and estimator."""
     steps = [("pre", pre)]
     if use_smote:
+        from ml_utils.transforms import SafeSMOTE
         steps.append(("smote", SafeSMOTE(random_state=seed)))
+    if isinstance(estimator, QuadraticDiscriminantAnalysis):
+        steps.append(("pca", PCA(n_components=0.95, svd_solver="full")))
     steps.append(("model", estimator))
     return ImbPipeline(steps)
 
@@ -342,12 +348,14 @@ def tune_or_fit_inner(
         pipe.fit(X_tr, y_tr)
         return pipe, pipe
     scorer = get_custom_scorer(args.scoring, label_encoder, args.main_group)
+    nj = int(os.getenv("SK_NJOBS", "1"))
     gs = GridSearchCV(
         estimator=pipe,
         param_grid=param_grid_adj,
         scoring=scorer,
         cv=filtered_splits,
-        n_jobs=-1,
+        n_jobs=nj,
+        pre_dispatch="1*n_jobs",
         refit=True,
         verbose=0,
     )
@@ -428,6 +436,16 @@ def run_nested_cv_and_eval(
                 class_names=class_names,
                 label_encoder=label_encoder,
             )
+            if os.getenv("CALIB", "1") != "0":
+                param = "estimator" if "estimator" in inspect.signature(CalibratedClassifierCV).parameters else "base_estimator"
+                kwargs = {
+                    param: est,
+                    "method": os.getenv("CALIB_METHOD", "isotonic"),
+                    "cv": int(os.getenv("CALIB_FOLDS", "3")),
+                }
+                est = CalibratedClassifierCV(**kwargs)
+                est.fit(X_tr, y_tr)
+
             last_search_obj = search_obj
             custom_score_fold = float(custom_scorer(est, X_va, y_va))
             custom_scores.append(custom_score_fold)

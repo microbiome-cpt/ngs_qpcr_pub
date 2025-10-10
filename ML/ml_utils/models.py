@@ -106,8 +106,8 @@ _HYPERPARAM_DISTS = {
         "model__verbose": [False],
     },
     "QDA": {
-        "model__reg_param": [0.05, 0.1, 0.2, 0.5],
-        "model__store_covariance": [False],
+        "model__reg_param": [0.2, 0.5, 0.8, 0.95],
+        "model__tol": [1e-4, 1e-3]
     },
     "LDA": [
         {"model__solver": ["svd"]},
