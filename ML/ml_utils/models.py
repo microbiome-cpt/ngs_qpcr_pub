@@ -82,7 +82,7 @@ _HYPERPARAM_DISTS = {
         "model__learning_rate": [0.05, 0.1, 0.3],
     },
     "XGBoost": {
-        "model__n_estimators": [300, 600],
+        "model__n_estimators": [200, 400],
         "model__learning_rate": [0.03, 0.1],
         "model__n_jobs": [1],
         "model__verbosity": [0],
