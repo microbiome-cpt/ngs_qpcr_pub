@@ -590,15 +590,6 @@ def run_nested_cv_and_eval(
 
 
 def posthoc_and_reporting(csv_path: Path, args, pack):
-    """
-    Post-hoc interpretation and final reporting:
-    - final fit of the best model
-    - saving OOF and metrics
-    - (if DEICODE) loadings
-    - final feature names, SHAP
-    - Leave-One-Out Accuracy by groups
-    - JSON + Markdown reports (with mean±SD [95% CI] by outer-folds)
-    """
     (
         df,
         y,
@@ -630,49 +621,27 @@ def posthoc_and_reporting(csv_path: Path, args, pack):
             if proba is not None:
                 if proba.ndim == 1:
                     df_oof = pd.DataFrame(
-                        {
-                            args.id_col: sample_ids,
-                            "y_true": y,
-                            "proba": proba,
-                            "pred": pred,
-                        }
+                        {args.id_col: sample_ids, "y_true": y, "proba": proba, "pred": pred}
                     )
                 elif proba.ndim == 2 and proba.shape[1] == 2:
                     df_oof = pd.DataFrame(
-                        {
-                            args.id_col: sample_ids,
-                            "y_true": y,
-                            "proba": proba[:, 1],
-                            "pred": pred,
-                        }
+                        {args.id_col: sample_ids, "y_true": y, "proba": proba[:, 1], "pred": pred}
                     )
                 else:
                     proba_cols = [f"p_class_{i}" for i in range(proba.shape[1])]
                     df_oof = pd.concat(
                         [
-                            pd.DataFrame(
-                                {args.id_col: sample_ids, "y_true": y, "pred": pred}
-                            ),
+                            pd.DataFrame({args.id_col: sample_ids, "y_true": y, "pred": pred}),
                             pd.DataFrame(proba, columns=proba_cols),
                         ],
                         axis=1,
                     )
-                df_oof.to_csv(
-                    out_dir / f"{csv_path.stem}_{args.norm}_{best_name}_oof_preds.csv",
-                    index=False,
-                    encoding="utf-8",
-                )
-            with open(
-                out_dir / f"{csv_path.stem}_{args.norm}_{best_name}_oof_metrics.json",
-                "w",
-                encoding="utf-8",
-            ) as fh:
+                df_oof.to_csv(out_dir / f"{csv_path.stem}_{args.norm}_{best_name}_oof_preds.csv", index=False, encoding="utf-8")
+            with open(out_dir / f"{csv_path.stem}_{args.norm}_{best_name}_oof_metrics.json", "w", encoding="utf-8") as fh:
                 json.dump(best_oof.get("metrics", {}), fh, ensure_ascii=False, indent=2)
-
     except Exception as e:
         log(f"WARNING: failed to save OOF: {e}")
 
-    log(f"Final fitting best model {best_name}")
     if hasattr(best_trained, "best_estimator_"):
         best_est_full = best_trained.best_estimator_
         best_params = getattr(best_trained, "best_params_", {}) or best_params
@@ -684,36 +653,22 @@ def posthoc_and_reporting(csv_path: Path, args, pack):
     try:
         if norm == "DEICODE":
             dec = pre_fitted.named_transformers_["microbiome"].named_steps["deicode"]
-            loadings = dec.get_loadings()  # (k, n_features)
+            loadings = dec.get_loadings()
             pc_cols = [f"PC{i+1}" for i in range(loadings.shape[0])]
-            load_df = pd.DataFrame(
-                loadings.T, index=micro_cols, columns=pc_cols
-            ).reset_index()
+            load_df = pd.DataFrame(loadings.T, index=micro_cols, columns=pc_cols).reset_index()
             load_df.rename(columns={"index": "feature"}, inplace=True)
-            load_df.to_csv(
-                out_dir / f"{csv_path.stem}_{args.norm}_deicode_loadings.csv",
-                index=False,
-            )
+            load_df.to_csv(out_dir / f"{csv_path.stem}_{args.norm}_deicode_loadings.csv", index=False)
     except Exception as e:
         log(f"WARNING: DEICODE loadings: {e}")
 
     if norm == "DEICODE":
         micro_tf = pre_fitted.named_transformers_["microbiome"].named_steps["deicode"]
         names = getattr(micro_tf, "get_feature_names_out", lambda: None)()
-        kept_micro = (
-            list(names)
-            if names is not None
-            else [
-                f"DEICODE_PC{i+1}"
-                for i in range(int(getattr(micro_tf, "n_components", 10)))
-            ]
-        )
+        kept_micro = list(names) if names is not None else [f"DEICODE_PC{i+1}" for i in range(int(getattr(micro_tf, "n_components", 10)))]
     else:
         micro_tf = pre_fitted.named_transformers_["microbiome"].named_steps["dedup"]
         keep_idx = getattr(micro_tf, "keep_idx_", None)
-        kept_micro = (
-            [micro_cols[i] for i in keep_idx] if keep_idx is not None else micro_cols
-        )
+        kept_micro = [micro_cols[i] for i in keep_idx] if keep_idx is not None else micro_cols
 
     final_feature_names = kept_micro + covs
 
@@ -721,77 +676,41 @@ def posthoc_and_reporting(csv_path: Path, args, pack):
         if norm != "DEICODE":
             dedup = pre_fitted.named_transformers_["microbiome"].named_steps["dedup"]
             rep_idx = getattr(dedup, "rep_idx_", None)
-            groups_for_cpi = (
-                [[i] for i in range(len(rep_idx))]
-                if rep_idx is not None
-                else [[i] for i in range(len(kept_micro))]
-            )
+            groups_for_cpi = [[i] for i in range(len(rep_idx))] if rep_idx is not None else [[i] for i in range(len(kept_micro))]
             Xp = pre_fitted.transform(df)
             scorer = safe_auc_scorer
-            cpi_df = conditional_group_permutation_importance(
-                best_est_full, Xp, y, groups_for_cpi, scorer, n_repeats=5, rng=args.seed
-            )
-            cpi_df.to_csv(
-                out_dir / f"{csv_path.stem}_{args.norm}_{best_name}_cpi.csv",
-                index=False,
-            )
+            cpi_df = conditional_group_permutation_importance(best_est_full, Xp, y, groups_for_cpi, scorer, n_repeats=5, rng=args.seed)
+            cpi_df.to_csv(out_dir / f"{csv_path.stem}_{args.norm}_{best_name}_cpi.csv", index=False)
     except Exception as e:
         log(f"WARNING: CPI failed: {e}")
 
     out_prefix = out_dir / f"{csv_path.stem}_{args.norm}_{best_name}"
-    save_feature_importances(
-        best_est_full.named_steps["model"], final_feature_names, str(out_prefix)
-    )
+    save_feature_importances(best_est_full.named_steps["model"], final_feature_names, str(out_prefix))
     try:
         X_full = pre_fitted.transform(df)
-        shap_feats = shap_top_features(
-            best_est_full.named_steps["model"], X_full, final_feature_names, top_n=20
-        )
-        pd.DataFrame({"shap_feature": shap_feats}).to_csv(
-            out_dir / f"{csv_path.stem}_{args.norm}_{best_name}_shap_top20.csv",
-            index=False,
-        )
+        shap_feats = shap_top_features(best_est_full.named_steps["model"], X_full, final_feature_names, top_n=20)
+        pd.DataFrame({"shap_feature": shap_feats}).to_csv(out_dir / f"{csv_path.stem}_{args.norm}_{best_name}_shap_top20.csv", index=False)
     except Exception:
         pass
 
     try:
         proba_full = best_est_full.predict_proba(df)
-        
         if len(class_names) > 2:
             metrics = compute_multiclass_metrics(y, proba_full, class_names)
-            
             multiclass_ece = multiclass_expected_calibration_error(y, proba_full, n_bins=10)
             metrics['multiclass_ece'] = multiclass_ece
-            
-            (out_dir / f"{csv_path.stem}_{args.norm}_{best_name}_multiclass_ece.txt").write_text(
-                f"{multiclass_ece:.6f}\n", encoding="utf-8"
-            )
+            (out_dir / f"{csv_path.stem}_{args.norm}_{best_name}_multiclass_ece.txt").write_text(f"{multiclass_ece:.6f}\n", encoding="utf-8")
         else:
             metrics = compute_basic_metrics(y, proba_full, pred=best_est_full.predict(df))
-        
-        (out_dir / "metrics.json").write_text(
-            json.dumps(metrics, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
-        
+        (out_dir / "metrics.json").write_text(json.dumps(metrics, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception:
         proba_full = None
 
     try:
-        if proba_full is not None and (
-            proba_full.ndim == 1 or (proba_full.ndim == 2 and proba_full.shape[1] == 2)
-        ):
-            save_calibration_table(
-                y,
-                proba_full,
-                bins=10,
-                out_csv=str(
-                    out_dir / f"{csv_path.stem}_{args.norm}_{best_name}_calibration.csv"
-                ),
-            )
+        if proba_full is not None and (proba_full.ndim == 1 or (proba_full.ndim == 2 and proba_full.shape[1] == 2)):
+            save_calibration_table(y, proba_full, bins=10, out_csv=str(out_dir / f"{csv_path.stem}_{args.norm}_{best_name}_calibration.csv"))
             ece = expected_calibration_error(y, proba_full, n_bins=10)
-            (out_dir / f"{csv_path.stem}_{args.norm}_{best_name}_ece.txt").write_text(
-                f"{ece:.6f}\n", encoding="utf-8"
-            )
+            (out_dir / f"{csv_path.stem}_{args.norm}_{best_name}_ece.txt").write_text(f"{ece:.6f}\n", encoding="utf-8")
     except Exception:
         pass
 
@@ -819,12 +738,12 @@ def posthoc_and_reporting(csv_path: Path, args, pack):
         f"Scipy {scipy.__version__}, "
         f"NumPy {np.__version__}, "
         f"pandas {pd.__version__}, "
-        f"SHAP { getattr(_shap, '__version__', 'N/A') }."
+        f"SHAP {getattr(_shap, '__version__', 'N/A')}."
     )
 
     md.append(
-        "**Validation:** nested CV — outer 5-fold (unbiased, group-aware), inner 3-fold (GridSearchCV on outer-train, group-aware). "
-        "Primary metric: ROC AUC (OVO). Additional: Accuracy, PR AUC (macro OVR), per-class Precision/Recall/F1 (OVR).\n"
+        f"**Validation:** nested CV — outer {args.outer_folds}-fold (unbiased, group-aware), inner {args.inner_folds}-fold (GridSearchCV on outer-train, group-aware). "
+        "Primary metric: Custom scoring (see args). Additional: Accuracy, PR AUC (macro OVR), per-class Precision/Recall/F1 (OVR).\n"
     )
 
     best_detail = next((m for m in per_model_details if m["model"] == best_name), None)
@@ -835,14 +754,11 @@ def posthoc_and_reporting(csv_path: Path, args, pack):
         md.append(f"- **CV Accuracy:** {_triplet(fold['acc'])}")
         md.append(f"- **PR AUC (macro, CV):** {_triplet(fold['pr_macro'])}\n")
         for k, cname in enumerate(fold["class_names"]):
-            md.append(
-                f"- **PR AUC (CV), class {cname}:** {_triplet(fold['pr_by_class'][k])}"
-            )
+            clean_name = cname.strip('()')
+            md.append(f"- **PR AUC (CV), {clean_name}:** {_triplet(fold['pr_by_class'][k])}")
         md.append("\n### Macro-averaged (OVR) — CV")
         md.append(f"- **Precision (macro):** {_triplet(fold['precision_macro'])}")
-        md.append(
-            f"- **Recall / Sensitivity (macro):** {_triplet(fold['recall_macro'])}"
-        )
+        md.append(f"- **Recall / Sensitivity (macro):** {_triplet(fold['recall_macro'])}")
         md.append(f"- **F1 (macro):** {_triplet(fold['f1_macro'])}\n")
         md.append("### Per-class metrics (CV)")
         for metric_key, title in [
@@ -851,9 +767,8 @@ def posthoc_and_reporting(csv_path: Path, args, pack):
             ("f1_by_class", "F1"),
         ]:
             for k, cname in enumerate(fold["class_names"]):
-                md.append(
-                    f"- **{title}, class {cname}:** {_triplet(fold[metric_key][k])}"
-                )
+                clean_name = cname.strip('()')
+                md.append(f"- **{title}, {clean_name}:** {_triplet(fold[metric_key][k])}")
         md.append("")
 
     md.append(f"- **LOO Accuracy (grouped by `{args.id_col}`):** {loo_acc:.3f}\n")
@@ -862,7 +777,6 @@ def posthoc_and_reporting(csv_path: Path, args, pack):
         try:
             multiclass_metrics = compute_multiclass_metrics(y, proba_full, class_names)
             multiclass_ece = multiclass_expected_calibration_error(y, proba_full, n_bins=10)
-            
             md.append("## Multiclass Metrics (Full Dataset)")
             md.append(f"- **Macro ROC AUC:** {multiclass_metrics.get('macro_roc_auc', 'N/A'):.3f}")
             md.append(f"- **Macro PR AUC:** {multiclass_metrics.get('macro_pr_auc', 'N/A'):.3f}")
@@ -871,18 +785,17 @@ def posthoc_and_reporting(csv_path: Path, args, pack):
             md.append(f"- **Multiclass ECE:** {multiclass_ece:.3f}")
             md.append(f"- **Brier Score:** {multiclass_metrics.get('brier_score', 'N/A'):.3f}")
             md.append(f"- **Log Loss:** {multiclass_metrics.get('log_loss', 'N/A'):.3f}\n")
-            
             md.append("### Per-Class Performance (Full Dataset)")
             for class_name, class_metrics in multiclass_metrics.get('per_class', {}).items():
-                md.append(f"**Class {class_name}:**")
+                clean_name = class_name.strip('()')
+                md.append(f"**{clean_name}:**")
                 md.append(f"  - Precision: {class_metrics.get('precision', 'N/A'):.3f}")
-                md.append(f"  - Recall: {class_metrics.get('recall', 'N/A'):.3f}")  
+                md.append(f"  - Recall: {class_metrics.get('recall', 'N/A'):.3f}")
                 md.append(f"  - F1: {class_metrics.get('f1', 'N/A'):.3f}")
                 md.append(f"  - ROC AUC: {class_metrics.get('roc_auc', 'N/A'):.3f}")
                 md.append(f"  - PR AUC: {class_metrics.get('pr_auc', 'N/A'):.3f}")
                 md.append(f"  - Support: {class_metrics.get('support', 'N/A')}")
                 md.append("")
-            
         except Exception as e:
             log(f"WARNING: multiclass metrics failed: {e}")
 
@@ -931,9 +844,7 @@ def posthoc_and_reporting(csv_path: Path, args, pack):
         encoding="utf-8",
     )
 
-    log(
-        f"Finished {csv_path.name} → best={best_name}, AUC={best_auc:.3f}; report saved."
-    )
+    log(f"Finished {csv_path.name} → best={best_name}, AUC={best_auc:.3f}; report saved.")
 
 
 def run_for_file(csv_path: Path, args):
