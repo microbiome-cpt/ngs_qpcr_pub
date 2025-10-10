@@ -32,7 +32,6 @@ _HYPERPARAM_DISTS = {
         "model__penalty": ["l2"],
         "model__solver": ["lbfgs"],
         "model__max_iter": [2000],
-        "model__multi_class": ["multinomial"],
     },
     "RandomForest": {
         "model__n_estimators": [100, 300, 500],
