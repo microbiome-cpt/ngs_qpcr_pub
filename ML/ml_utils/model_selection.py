@@ -101,7 +101,7 @@ def data_loading_and_preprocessing(csv_path: Path, args) -> Dict[str, Any]:
 
     log("Encoding target")
     y, le, target_resolved = encode_target(df, args.target_col)
-    class_names = [str(c) for c in np.unique(y)]
+    class_names = [str(c) for c in le.classes_]
 
     log("Selecting feature blocks")
     micro_cols, covs = select_feature_blocks(
@@ -628,7 +628,8 @@ def posthoc_and_reporting(csv_path: Path, args, pack):
                         {args.id_col: sample_ids, "y_true": y, "proba": proba[:, 1], "pred": pred}
                     )
                 else:
-                    proba_cols = [f"p_class_{i}" for i in range(proba.shape[1])]
+                    safe = lambda s: ''.join(ch if ch.isalnum() or ch in ('_', '-') else '_' for ch in str(s))
+                    proba_cols = [f"p_{safe(cname)}" for cname in class_names]
                     df_oof = pd.concat(
                         [
                             pd.DataFrame({args.id_col: sample_ids, "y_true": y, "pred": pred}),
