@@ -33,8 +33,9 @@ _HYPERPARAM_DISTS = {
         "model__max_iter": [1000],
     },
     "RandomForest": {
-        "model__n_estimators": [500, 800],
+        "model__n_estimators": [100, 300, 500],
         "model__max_depth": [None, 6, 10],
+        "model__min_samples_split": [2, 5],
         "model__min_samples_leaf": [1, 2, 4],
         "model__max_features": ["sqrt", 0.5, 0.7],
     },
@@ -75,9 +76,11 @@ _HYPERPARAM_DISTS = {
         "model__learning_rate": [0.05, 0.1, 0.5],
     },
     "XGBoost": {
-        "model__n_estimators": [400, 800],
-        "model__learning_rate": [0.03, 0.1],
-        "model__max_depth": [3, 5],
+        "model__n_estimators": [100, 200],
+        "model__learning_rate": [0.1, 0.2],
+        "model__n_jobs": [1],
+        "model__verbosity": [0],
+        "model__max_depth": [3, 6],
         "model__subsample": [0.7, 0.9, 1.0],
         "model__colsample_bytree": [0.7, 1.0],
         "model__reg_lambda": [0.0, 1.0, 5.0],
@@ -89,7 +92,7 @@ _HYPERPARAM_DISTS = {
         "model__l2_leaf_reg": [1.0, 3.0, 5.0],
     },
     "QDA": {
-        "model__reg_param": [0.01, 0.1, 0.5],
+        "model__reg_param": [0.0, 0.01, 0.1],
     },
     "LDA": [
         {"model__solver": ["svd"]},
@@ -101,8 +104,8 @@ _HYPERPARAM_DISTS = {
 def get_classifiers(seed=42):
     return [
         ("LDA", LinearDiscriminantAnalysis()),
-        ("SVC", SVC(probability=True, random_state=seed)),
-        ("LogisticRegression", LogisticRegression(max_iter=1000, random_state=seed)),
+        ("SVC", SVC(probability=True, class_weight="balanced", random_state=seed)),
+        ("LogisticRegression", LogisticRegression(max_iter=1000, class_weight="balanced", random_state=seed)),
         (
             "RandomForest",
             RandomForestClassifier(
@@ -116,7 +119,7 @@ def get_classifiers(seed=42):
         ("DecisionTree", DecisionTreeClassifier(random_state=seed)),
         ("GaussianNB", GaussianNB()),
         ("MLP", MLPClassifier(max_iter=800, random_state=seed)),
-        ("AdaBoost", AdaBoostClassifier(algorithm="SAMME", random_state=seed)),
+        ("AdaBoost", AdaBoostClassifier(random_state=seed)),
         (
             "XGBoost",
             XGBClassifier(
@@ -124,13 +127,14 @@ def get_classifiers(seed=42):
                 verbosity=0,
                 random_state=seed,
                 tree_method="hist",
+                n_jobs=1,
             ),
         ),
         (
             "CatBoost",
-            CatBoostClassifier(verbose=0, random_seed=seed, loss_function="Logloss"),
+            CatBoostClassifier(verbose=0, random_seed=seed, loss_function="Logloss",thread_count=1),
         ),
-        ("QDA", QuadraticDiscriminantAnalysis()),
+        ("QDA", QuadraticDiscriminantAnalysis(reg_param=0.01)),
     ]
 
 

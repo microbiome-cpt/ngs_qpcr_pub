@@ -12,12 +12,16 @@ import scipy
 import sklearn
 from sklearn.model_selection import StratifiedGroupKFold, GridSearchCV, LeaveOneGroupOut
 from sklearn.metrics import (
-    roc_auc_score,
-    accuracy_score,
-    average_precision_score,
+    roc_auc_score, 
+    average_precision_score, 
+    f1_score, 
+    precision_score, 
+    recall_score, 
+    accuracy_score, 
     precision_recall_fscore_support,
+    balanced_accuracy_score,
+    precision_recall_curve,
 )
-import imblearn
 from imblearn.pipeline import Pipeline as ImbPipeline
 
 try:
@@ -45,10 +49,12 @@ from ml_utils.io_utils import (
 from ml_utils.models import iter_model_specs
 from ml_utils.importance_utils import (
     compute_basic_metrics,
+    compute_multiclass_metrics,
     save_feature_importances,
     shap_top_features,
     save_calibration_table,
     expected_calibration_error,
+    multiclass_expected_calibration_error,
     conditional_group_permutation_importance,
     safe_auc_scorer,
     _mean_std_ci,
@@ -62,7 +68,7 @@ def log(msg: str):
     print(f"[{ts}] {msg}")
 
 
-def make_pipe(pre, estimator, seed, use_smote=True):
+def make_pipe(pre, estimator, seed, use_smote=False):
     """Build ML pipeline with preprocessing, optional SMOTE, and estimator."""
     steps = [("pre", pre)]
     if use_smote:
@@ -95,7 +101,7 @@ def data_loading_and_preprocessing(csv_path: Path, args) -> Dict[str, Any]:
 
     log("Encoding target")
     y, le, target_resolved = encode_target(df, args.target_col)
-    class_names = [str(c) for c in le.classes_]
+    class_names = [str(c) for c in np.unique(y)]
 
     log("Selecting feature blocks")
     micro_cols, covs = select_feature_blocks(
@@ -125,7 +131,154 @@ def data_loading_and_preprocessing(csv_path: Path, args) -> Dict[str, Any]:
         "norm": norm,
         "micro_cols": micro_cols,
         "covs": covs,
+        "label_encoder": le,
     }
+
+
+def parse_metric_and_group(token):
+    if '[' in token and token.endswith(']'):
+        metric = token[:token.index('[')].strip()
+        group = token[token.index('[')+1:-1].strip()
+        return metric, group
+    else:
+        return token.strip(), None
+
+
+def get_custom_scorer(scoring_arg, label_encoder, main_group):
+    if "[" not in scoring_arg and "macro_" not in scoring_arg:
+        scoring_arg = "+".join(f"{met}[{main_group}]" for met in scoring_arg.split("+"))
+    
+    tokens = scoring_arg.split("+")
+    parsed_metrics = []
+    
+    def _parse_token(tok):
+        tok = tok.strip()
+        weight = 1.0
+        
+        if "*" in tok:
+            tok, w_str = tok.rsplit("*", 1)
+            weight = float(w_str)
+        
+        if tok.startswith("macro_"):
+            metric = tok[len("macro_"):]
+            return ("macro", metric, None, weight)
+        
+        if "[" in tok and "]" in tok:
+            metric = tok.split("[")[0].strip()
+            group = tok.split("[")[1].split("]")[0].strip()
+            return ("group", metric, group, weight)
+        
+        raise ValueError(f"Token '{tok}' must be in format 'metric[group]', 'macro_metric' or include weights with '*'")
+    
+    for token in tokens:
+        parsed_metrics.append(_parse_token(token))
+    
+    def _find_best_threshold(y_true, y_scores, metric_type="f1", min_precision=None):
+        if len(np.unique(y_true)) < 2:
+            return 0.5
+        
+        precisions, recalls, thresholds = precision_recall_curve(y_true, y_scores)
+        
+        if metric_type == "f1":
+            f1_scores = 2 * (precisions * recalls) / (precisions + recalls + 1e-8)
+            
+            if min_precision is not None:
+                valid_mask = precisions >= min_precision
+                if np.any(valid_mask):
+                    valid_f1 = f1_scores[valid_mask]
+                    valid_thresholds = thresholds[valid_mask[:-1]]
+                    if len(valid_thresholds) > 0:
+                        best_idx = np.argmax(valid_f1)
+                        return valid_thresholds[best_idx]
+            
+            if len(thresholds) > 0:
+                best_idx = np.argmax(f1_scores[:-1])
+                return thresholds[best_idx]
+        
+        elif metric_type == "recall":
+            if min_precision is not None:
+                valid_mask = precisions >= min_precision
+                if np.any(valid_mask):
+                    valid_recalls = recalls[valid_mask]
+                    valid_thresholds = thresholds[valid_mask[:-1]]
+                    if len(valid_thresholds) > 0:
+                        best_idx = np.argmax(valid_recalls)
+                        return valid_thresholds[best_idx]
+        
+        return 0.5
+    
+    def _metric_value(metric, y_bin, y_pred_bin, y_scores):
+        if len(np.unique(y_bin)) < 2:
+            return 0.0
+        
+        if metric == "roc_auc":
+            return roc_auc_score(y_bin, y_scores)
+        elif metric == "pr_auc":
+            return average_precision_score(y_bin, y_scores)
+        elif metric == "f1":
+            return f1_score(y_bin, y_pred_bin, zero_division=0)
+        elif metric == "f1_tuned":
+            threshold = _find_best_threshold(y_bin, y_scores, "f1")
+            y_pred_tuned = (y_scores >= threshold).astype(int)
+            return f1_score(y_bin, y_pred_tuned, zero_division=0)
+        elif metric == "precision":
+            return precision_score(y_bin, y_pred_bin, zero_division=0)
+        elif metric == "recall":
+            return recall_score(y_bin, y_pred_bin, zero_division=0)
+        elif metric == "recall_tuned":
+            threshold = _find_best_threshold(y_bin, y_scores, "recall", min_precision=0.1)
+            y_pred_tuned = (y_scores >= threshold).astype(int)
+            return recall_score(y_bin, y_pred_tuned, zero_division=0)
+        elif metric == "accuracy":
+            return accuracy_score(y_bin, y_pred_bin)
+        elif metric == "balanced_accuracy":
+            return balanced_accuracy_score(y_bin, y_pred_bin)
+        else:
+            raise ValueError(f"Unknown metric {metric}")
+    
+    class CustomScorer:
+        def __init__(self, metrics):
+            self.metrics = metrics
+        
+        def __call__(self, estimator, X, y_true, **kwargs):
+            vals, weights = [], []
+            proba = estimator.predict_proba(X)
+            y_pred = estimator.predict(X)
+            classes = label_encoder.classes_
+            
+            for mode, metric, group_or_none, weight in self.metrics:
+                if mode == "group":
+                    if group_or_none in classes:
+                        grp_idx = label_encoder.transform([group_or_none])[0]
+                    elif group_or_none.strip("()") in classes:
+                        grp_idx = label_encoder.transform([group_or_none.strip("()")])[0]
+                    else:
+                        raise ValueError(f"Group '{group_or_none}' not found in classes: {list(classes)}")
+                    
+                    y_bin = (y_true == grp_idx).astype(int)
+                    y_pred_bin = (y_pred == grp_idx).astype(int)
+                    y_scores = proba[:, grp_idx]
+                    
+                    val = _metric_value(metric, y_bin, y_pred_bin, y_scores)
+                
+                elif mode == "macro":
+                    per_class_vals = []
+                    for k, class_label in enumerate(classes):
+                        y_bin = (y_true == k).astype(int)
+                        y_pred_bin = (y_pred == k).astype(int)
+                        y_scores = proba[:, k]
+                        
+                        class_val = _metric_value(metric, y_bin, y_pred_bin, y_scores)
+                        per_class_vals.append(class_val)
+                    
+                    val = float(np.nanmean(per_class_vals))
+                
+                vals.append(val)
+                weights.append(weight)
+            
+            return float(np.average(vals, weights=weights))
+    
+    return CustomScorer(parsed_metrics)
 
 
 def build_model_specs(
@@ -139,7 +292,7 @@ def build_model_specs(
 
 
 def tune_or_fit_inner(
-    _name: str,  # unused
+    _name: str,
     estimator,
     param_grid: Dict[str, Any],
     X_tr: pd.DataFrame,
@@ -149,6 +302,8 @@ def tune_or_fit_inner(
     pre,
     args,
     n_classes_tr: int,
+    class_names: List[str] = None,
+    label_encoder=None,
 ):
     """Internal 3-fold GridSearchCV on outer-train."""
     estimator_adj = estimator
@@ -170,7 +325,7 @@ def tune_or_fit_inner(
     except Exception:
         pass
 
-    pipe = make_pipe(pre, estimator_adj, seed=args.seed, use_smote=not args.no_smote)
+    pipe = make_pipe(pre, estimator_adj, seed=args.seed, use_smote=args.use_smote)
 
     inner_splits_raw = list(inner_cv.split(X_tr, y_tr, groups_tr))
     filtered_splits = [
@@ -186,11 +341,11 @@ def tune_or_fit_inner(
     ):
         pipe.fit(X_tr, y_tr)
         return pipe, pipe
-
+    scorer = get_custom_scorer(args.scoring, label_encoder, args.main_group)
     gs = GridSearchCV(
         estimator=pipe,
         param_grid=param_grid_adj,
-        scoring=safe_auc_scorer,
+        scoring=scorer,
         cv=filtered_splits,
         n_jobs=-1,
         refit=True,
@@ -204,12 +359,14 @@ def run_nested_cv_and_eval(
     df: pd.DataFrame,
     y: np.ndarray,
     groups: np.ndarray,
-    class_names: List[str],
     pre,
-    args,
     model_specs: List[Tuple[str, Any, Dict[str, Any]]],
+    class_names=None,
+    args=None,
+    label_encoder=None,
 ):
     """Run nested cross-validation and return evaluation results."""
+    custom_scorer = get_custom_scorer(args.scoring, label_encoder, args.main_group)
     y_ser = pd.Series(y)
     min_count = int(y_ser.value_counts().min())
     n_outer = min(args.outer_folds, max(2, min_count))
@@ -229,9 +386,11 @@ def run_nested_cv_and_eval(
     candidates = []
     per_model_details = []
     oof_store: Dict[str, Any] = {}
+    custom_scores = []
 
     for name, estimator, param_grid in model_specs:
         log(f"=== [{name}] start nested CV ===")
+        custom_scores = []
         oof_proba = (
             np.full(n_samples, np.nan, dtype=float)
             if n_classes_all == 2
@@ -266,9 +425,12 @@ def run_nested_cv_and_eval(
                 pre,
                 args,
                 n_classes_tr=int(np.unique(y_tr).size),
+                class_names=class_names,
+                label_encoder=label_encoder,
             )
             last_search_obj = search_obj
-
+            custom_score_fold = float(custom_scorer(est, X_va, y_va))
+            custom_scores.append(custom_score_fold)
             proba = est.predict_proba(X_va) if hasattr(est, "predict_proba") else None
             y_pred = est.predict(X_va)
             y_pred = np.asarray(y_pred).ravel()
@@ -380,7 +542,8 @@ def run_nested_cv_and_eval(
         valid_pr = [v for v in pr_aucs_macro if np.isfinite(v)]
         mean_pr = float(np.mean(valid_pr)) if len(valid_pr) > 0 else float("nan")
 
-        candidates.append((name, last_search_obj, mean_auc, mean_acc, mean_pr))
+        mean_custom = float(np.nanmean(custom_scores)) if custom_scores else float("nan")
+        candidates.append((name, last_search_obj, mean_auc, mean_acc, mean_pr, mean_custom))
         per_model_details.append(
             {
                 "model": name,
@@ -408,9 +571,7 @@ def run_nested_cv_and_eval(
     if not candidates:
         raise RuntimeError("No models trained; check data/params.")
 
-    best_name, best_trained, best_auc, best_acc, best_pr = max(
-        candidates, key=lambda t: t[2]
-    )
+    best_name, best_trained, best_auc, best_acc, best_pr, _ = max(candidates, key=lambda t: t[5])
     best_params = (
         getattr(best_trained, "best_params_", {})
         if hasattr(best_trained, "best_params_")
@@ -442,7 +603,7 @@ def posthoc_and_reporting(csv_path: Path, args, pack):
         df,
         y,
         groups,
-        classnames,
+        class_names,
         pre,
         norm,
         micro_cols,
@@ -595,10 +756,23 @@ def posthoc_and_reporting(csv_path: Path, args, pack):
 
     try:
         proba_full = best_est_full.predict_proba(df)
-        metrics = compute_basic_metrics(y, proba_full, pred=best_est_full.predict(df))
+        
+        if len(class_names) > 2:
+            metrics = compute_multiclass_metrics(y, proba_full, class_names)
+            
+            multiclass_ece = multiclass_expected_calibration_error(y, proba_full, n_bins=10)
+            metrics['multiclass_ece'] = multiclass_ece
+            
+            (out_dir / f"{csv_path.stem}_{args.norm}_{best_name}_multiclass_ece.txt").write_text(
+                f"{multiclass_ece:.6f}\n", encoding="utf-8"
+            )
+        else:
+            metrics = compute_basic_metrics(y, proba_full, pred=best_est_full.predict(df))
+        
         (out_dir / "metrics.json").write_text(
             json.dumps(metrics, ensure_ascii=False, indent=2), encoding="utf-8"
         )
+        
     except Exception:
         proba_full = None
 
@@ -642,7 +816,6 @@ def posthoc_and_reporting(csv_path: Path, args, pack):
     md.append(
         f"**Software:** Python {platform.python_version()}, "
         f"scikit-learn {sklearn.__version__}, "
-        f"imbalanced-learn {imblearn.__version__}, "
         f"Scipy {scipy.__version__}, "
         f"NumPy {np.__version__}, "
         f"pandas {pd.__version__}, "
@@ -684,6 +857,35 @@ def posthoc_and_reporting(csv_path: Path, args, pack):
         md.append("")
 
     md.append(f"- **LOO Accuracy (grouped by `{args.id_col}`):** {loo_acc:.3f}\n")
+
+    if len(class_names) > 2 and proba_full is not None:
+        try:
+            multiclass_metrics = compute_multiclass_metrics(y, proba_full, class_names)
+            multiclass_ece = multiclass_expected_calibration_error(y, proba_full, n_bins=10)
+            
+            md.append("## Multiclass Metrics (Full Dataset)")
+            md.append(f"- **Macro ROC AUC:** {multiclass_metrics.get('macro_roc_auc', 'N/A'):.3f}")
+            md.append(f"- **Macro PR AUC:** {multiclass_metrics.get('macro_pr_auc', 'N/A'):.3f}")
+            md.append(f"- **Macro F1:** {multiclass_metrics.get('macro_f1', 'N/A'):.3f}")
+            md.append(f"- **Balanced Accuracy:** {multiclass_metrics.get('balanced_accuracy', 'N/A'):.3f}")
+            md.append(f"- **Multiclass ECE:** {multiclass_ece:.3f}")
+            md.append(f"- **Brier Score:** {multiclass_metrics.get('brier_score', 'N/A'):.3f}")
+            md.append(f"- **Log Loss:** {multiclass_metrics.get('log_loss', 'N/A'):.3f}\n")
+            
+            md.append("### Per-Class Performance (Full Dataset)")
+            for class_name, class_metrics in multiclass_metrics.get('per_class', {}).items():
+                md.append(f"**Class {class_name}:**")
+                md.append(f"  - Precision: {class_metrics.get('precision', 'N/A'):.3f}")
+                md.append(f"  - Recall: {class_metrics.get('recall', 'N/A'):.3f}")  
+                md.append(f"  - F1: {class_metrics.get('f1', 'N/A'):.3f}")
+                md.append(f"  - ROC AUC: {class_metrics.get('roc_auc', 'N/A'):.3f}")
+                md.append(f"  - PR AUC: {class_metrics.get('pr_auc', 'N/A'):.3f}")
+                md.append(f"  - Support: {class_metrics.get('support', 'N/A')}")
+                md.append("")
+            
+        except Exception as e:
+            log(f"WARNING: multiclass metrics failed: {e}")
+
     (out_dir / f"{csv_path.stem}_{args.norm}_{best_name}_report.md").write_text(
         "\n".join(md), encoding="utf-8"
     )
@@ -703,6 +905,22 @@ def posthoc_and_reporting(csv_path: Path, args, pack):
         },
         "loo_accuracy": loo_acc,
     }
+
+    if len(class_names) > 2 and proba_full is not None:
+        try:
+            multiclass_metrics = compute_multiclass_metrics(y, proba_full, class_names)
+            summary["multiclass_metrics"] = {
+                "macro_roc_auc": multiclass_metrics.get('macro_roc_auc'),
+                "macro_pr_auc": multiclass_metrics.get('macro_pr_auc'),
+                "macro_f1": multiclass_metrics.get('macro_f1'),
+                "balanced_accuracy": multiclass_metrics.get('balanced_accuracy'),
+                "multiclass_ece": multiclass_expected_calibration_error(y, proba_full),
+                "brier_score": multiclass_metrics.get('brier_score'),
+                "per_class": multiclass_metrics.get('per_class')
+            }
+        except Exception as e:
+            log(f"WARNING: multiclass summary failed: {e}")
+
     (out_dir / "report.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
     )
@@ -724,7 +942,7 @@ def run_for_file(csv_path: Path, args):
     out_dir.mkdir(parents=True, exist_ok=True)
 
     d = data_loading_and_preprocessing(csv_path, args)
-
+    label_encoder = d["label_encoder"]
     model_specs = build_model_specs(seed=args.seed, skip=args.skip_models)
 
     (
@@ -737,9 +955,15 @@ def run_for_file(csv_path: Path, args):
         best_trained,
         best_params,
     ) = run_nested_cv_and_eval(
-        d["df"], d["y"], d["groups"], d["class_names"], d["pre"], args, model_specs
+            d["df"],
+            d["y"],
+            d["groups"],
+            d["pre"],
+            model_specs,
+            d["class_names"],
+            args,
+            label_encoder=label_encoder,
     )
-
     pack = (
         d["df"],
         d["y"],
@@ -767,18 +991,23 @@ def parse_args():
     )
     p.add_argument("--data", type=Path, nargs="+", required=True, help="CSV files")
     p.add_argument("--target-col", type=str, required=True, help="Target column")
+    p.add_argument('--scoring', type=str, default='roc_auc[FS]',
+                help='Metric or ensemble to optimize, format: "roc_auc[FS]" or "roc_auc[FS]+pr_auc[FS]+f1[FS]"')
+    p.add_argument('--main_group', type=str, default='FS',
+                help='Main group to optimize')
+
     p.add_argument("--id-col", type=str, required=True, help="Group column")
     p.add_argument("--exclude-cols", nargs="*", default=[], help="Columns to exclude")
     p.add_argument(
         "--norm",
         choices=["log10", "CLR", "DEICODE"],
-        default="CLR",
+        default="log10",
         help="Normalization mode",
     )
     p.add_argument("--outer-folds", type=int, default=5)
     p.add_argument("--inner-folds", type=int, default=3)
     p.add_argument("--seed", type=int, default=42)
-    p.add_argument("--no-smote", action="store_true")
+    p.add_argument("--use-smote", action="store_true", help="Enable SMOTE for balancing")
     p.add_argument(
         "--corr-threshold", type=float, default=0.98, help="|corr(CLR)| threshold"
     )
