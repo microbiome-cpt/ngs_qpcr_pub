@@ -1,4 +1,9 @@
 import os, inspect
+if os.getenv("ML_THREADS_ONE","0")=="1":
+    os.environ["OMP_NUM_THREADS"]="1"
+    os.environ["OPENBLAS_NUM_THREADS"]="1"
+    os.environ["MKL_NUM_THREADS"]="1"
+    os.environ["NUMEXPR_NUM_THREADS"]="1"
 import platform
 import json
 from copy import deepcopy
@@ -75,7 +80,6 @@ def log(msg: str):
 def make_pipe(pre, estimator, seed, use_smote=False):
     steps = [("pre", pre)]
     if use_smote:
-        from ml_utils.transforms import SafeSMOTE
         steps.append(("smote", SafeSMOTE(random_state=seed)))
     if isinstance(estimator, QuadraticDiscriminantAnalysis):
         steps.append(("pca", PCA(n_components=0.95, svd_solver="full")))
@@ -311,23 +315,18 @@ def tune_or_fit_inner(
     class_names: List[str] = None,
     label_encoder=None,
 ):
-    """Internal 3-fold GridSearchCV on outer-train."""
     estimator_adj = estimator
     param_grid_adj = deepcopy(param_grid) if param_grid else {}
 
     try:
         if isinstance(estimator_adj, CatBoostClassifier) and n_classes_tr > 2:
-            estimator_adj = estimator_adj.set_params(
-                loss_function="MultiClass", eval_metric="MultiClass"
-            )
+            estimator_adj = estimator_adj.set_params(loss_function="MultiClass", eval_metric="MultiClass")
             param_grid_adj.setdefault("model__loss_function", ["MultiClass"])
     except Exception:
         pass
     try:
         if isinstance(estimator_adj, XGBClassifier) and n_classes_tr > 2:
-            estimator_adj = estimator_adj.set_params(
-                objective="multi:softprob", num_class=n_classes_tr
-            )
+            estimator_adj = estimator_adj.set_params(objective="multi:softprob", num_class=n_classes_tr)
     except Exception:
         pass
 
@@ -340,22 +339,17 @@ def tune_or_fit_inner(
         if np.unique(y_tr[tr_f]).size >= 2 and np.unique(y_tr[va_f]).size >= 2
     ]
 
-    if (
-        (len(filtered_splits) == 0)
-        or (X_tr.shape[0] < 2 * inner_cv.n_splits)
-        or (not param_grid_adj)
-    ):
+    if (len(filtered_splits) == 0) or (X_tr.shape[0] < 2 * inner_cv.n_splits) or (not param_grid_adj):
         pipe.fit(X_tr, y_tr)
         return pipe, pipe
+
     scorer = get_custom_scorer(args.scoring, label_encoder, args.main_group)
-    nj = int(os.getenv("SK_NJOBS", "1"))
     gs = GridSearchCV(
         estimator=pipe,
         param_grid=param_grid_adj,
         scoring=scorer,
         cv=filtered_splits,
-        n_jobs=nj,
-        pre_dispatch="1*n_jobs",
+        n_jobs=-1,
         refit=True,
         verbose=0,
     )
@@ -436,7 +430,7 @@ def run_nested_cv_and_eval(
                 class_names=class_names,
                 label_encoder=label_encoder,
             )
-            if os.getenv("CALIB", "1") != "0":
+            if os.getenv("CALIB", "0") != "0":
                 param = "estimator" if "estimator" in inspect.signature(CalibratedClassifierCV).parameters else "base_estimator"
                 kwargs = {
                     param: est,
@@ -445,6 +439,7 @@ def run_nested_cv_and_eval(
                 }
                 est = CalibratedClassifierCV(**kwargs)
                 est.fit(X_tr, y_tr)
+
 
             last_search_obj = search_obj
             custom_score_fold = float(custom_scorer(est, X_va, y_va))

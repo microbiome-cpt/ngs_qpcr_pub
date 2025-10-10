@@ -76,7 +76,7 @@ def clr_transform(X):
 class MicrobiomeNormalizer(BaseEstimator, TransformerMixin):
     def __init__(self, mode="CLR", delta=1e-6):
         self.mode = mode
-        self.delta = delta
+        self.delta = float(delta)
 
     def fit(self, X, y=None):
         return self
@@ -85,11 +85,15 @@ class MicrobiomeNormalizer(BaseEstimator, TransformerMixin):
         Z = np.asarray(X, dtype=float)
         mode = str(self.mode).lower()
         if mode == "log10":
-            Z = np.log10(Z + float(self.delta))
-            Z[np.isneginf(Z)] = 0.0
+            Z = np.clip(Z, 0, None)
+            Z = np.log10(Z + self.delta)
+            Z = np.nan_to_num(Z, nan=0.0, posinf=0.0, neginf=0.0)
             return Z
         elif mode == "clr":
-            return clr_transform(multiplicative_replacement(Z, delta=self.delta))
+            Z = multiplicative_replacement(Z, delta=self.delta)
+            Z = clr_transform(Z)
+            Z = np.nan_to_num(Z, nan=0.0, posinf=0.0, neginf=0.0)
+            return Z
         else:
             raise ValueError(f"Unknown norm mode for MicrobiomeNormalizer: {self.mode}")
 

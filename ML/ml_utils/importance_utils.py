@@ -18,7 +18,6 @@ except ImportError:
     shap = None
 
 
-
 def save_feature_importances(model, feature_names, out_prefix: str):
     try:
         if hasattr(model, "feature_importances_"):
