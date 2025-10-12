@@ -50,6 +50,14 @@ Input files are CSV. You specify:
 
 Helper utilities sanitize columns, encode Sex → Sex_enc, and automatically select numeric microbiome signatures while keeping common covariates (e.g., Sex_enc, Age, BMI).
 
+Notes:
+
+- Delimiter and encoding are auto-detected (,/;, UTF-8/CP1251 supported).
+- Features = all non-excluded columns except target/ID; missing values are safely imputed.
+- Multiclass is supporte and per-class scoring uses label names exactly as in the data.
+- Grouped CV requires ≥2 samples per class per fold. Tiny classes will be auto-skipped in inner splits.
+
+
 ## CLI arguments
 
 `model_selection.py` exposes the following arguments (main ones):
@@ -58,14 +66,40 @@ Helper utilities sanitize columns, encode Sex → Sex_enc, and automatically sel
 - `--target-col <str>`: target label column (e.g., Disease).
 - `--id-col <str>`: group ID column (ensures group-aware splits).
 - `--exclude-cols <str ...>`: columns to drop from features.
-- `--norm {log10,CLR,DEICODE}`: normalization mode.
+- `--norm {NONE,log10,CLR,DEICODE}`: normalization mode (default: NONE).
 - `--outer-folds <int>` / `--inner-folds <int>`: CV folds (default 5/3).
 - `--seed <int>`: random seed.
-- `--no-smote`: disable SMOTE oversampling (enabled by default).
+- `--scoring <expr>`: Scoring by chosen metric for model selection (see below).
+- `--main_group <str>`: Optional group focus if not specified explicitly in the scoring argument.
+- `--use-smote`: Optional enable SMOTE (default is off).
 - `--corr-threshold <float>`: |corr(CLR)| threshold for redundancy filter (non-DEICODE).
 - `--deicode-components <int>`: number of DEICODE RPCA components (DEICODE only).
 - `--output-root <path>`: output directory (default msel_out).
 - `--skip-models <names ...>`: exclude some classifiers by name.
+
+### Available metrics & Scoring
+
+- Binary/OVR: `roc_auc`, `pr_auc`, `f1`, `accuracy`, `balanced_accuracy`, `log_loss`
+
+- Macro (class-balanced): `macro_pr_auc`, `macro_f1`
+
+- Tuned: *_tuned (e.g., `f1_tuned`) — decision threshold is optimized on inner-CV, then used for evaluation.
+
+#### Scoring
+
+Combine metrics with +, apply weights with *.
+
+- Per-class metric: metric[ClassName] (e.g., pr_auc[PF]). If class omitted, `--main_group` supplies the default.
+
+- Macro metrics (macro_*) aggregate across classes and ignore `--main_group`.
+
+``` bash
+# Examples
+--scoring "roc_auc+f1_tuned"
+--scoring "pr_auc+f1_tuned" --main_group PF
+--scoring "macro_pr_auc+macro_f1"
+--scoring "pr_auc[HFpEF]*2 + pr_auc[HFrEF]*2 + macro_f1"
+```
 
 ## How to run
 
@@ -79,7 +113,8 @@ python ngs_qpcr_pub/ML/model_selection.py \
   --target-col Disease \
   --id-col Name \
   --exclude-cols Method \
-  --norm CLR \
+  --scoring "pr_auc+f1_tuned" \
+  --main_group PF \
   --outer-folds 5 --inner-folds 3 \
   --seed 42 \
   --output-root msel_out
@@ -95,6 +130,7 @@ python ngs_qpcr_pub/ML/model_selection.py \
   --id-col Name \
   --exclude-cols Method \
   --norm DEICODE --deicode-components 50 \
+  --scoring "macro_pr_auc+macro_f1"
   --outer-folds 5 --inner-folds 3 \
   --seed 42 \
   --output-root msel_out
@@ -109,4 +145,3 @@ For each input CSV, an output folder is created under `--output-root/<file_stem>
 - out-of-fold predictions and metrics, best params, summary JSON, and a Markdown report;
 - feature importance / SHAP top-20 CSVs; optional DEICODE loadings;
 - LOO accuracy summary.
-
