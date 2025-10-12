@@ -84,18 +84,20 @@ class MicrobiomeNormalizer(BaseEstimator, TransformerMixin):
     def transform(self, X):
         Z = np.asarray(X, dtype=float)
         mode = str(self.mode).lower()
+        if mode in ("none", "raw", "identity"):
+            return Z
         if mode == "log10":
             Z = np.clip(Z, 0, None)
             Z = np.log10(Z + self.delta)
             Z = np.nan_to_num(Z, nan=0.0, posinf=0.0, neginf=0.0)
             return Z
-        elif mode == "clr":
+        if mode == "clr":
             Z = multiplicative_replacement(Z, delta=self.delta)
             Z = clr_transform(Z)
             Z = np.nan_to_num(Z, nan=0.0, posinf=0.0, neginf=0.0)
             return Z
-        else:
-            raise ValueError(f"Unknown norm mode for MicrobiomeNormalizer: {self.mode}")
+        raise ValueError(f"Unknown norm mode for MicrobiomeNormalizer: {self.mode}")
+
 
 
 class DeicodeTransformer(BaseEstimator, TransformerMixin):
@@ -224,44 +226,30 @@ def build_preprocessor(
     corr_threshold: float = 0.98,
     prefer: str = "prevalence",
 ):
-
     norm_up = (norm or "").upper()
-    if norm_up not in {"DEICODE", "CLR", "LOG10"}:
-        raise ValueError(f"Unknown norm: {norm}")
-
     if norm_up == "DEICODE":
-        micro_pipe = SkPipeline(
-            steps=[
-                # int 0 (а не 0.0)
-                ("imputer", SafeSimpleImputer(strategy="constant", fill_value=0)),
-                ("deicode", DeicodeTransformer(n_components=deicode_components)),
-            ]
-        )
+        micro_pipe = SkPipeline([
+            ("imputer", SafeSimpleImputer(strategy="constant", fill_value=0)),
+            ("deicode", DeicodeTransformer(n_components=deicode_components)),
+        ])
+    elif norm_up == "NONE":
+        micro_pipe = SkPipeline([
+            ("imputer", SafeSimpleImputer(strategy="constant", fill_value=0)),
+            ("dedup", CLRRedundancyFilter(corr_threshold=float(corr_threshold), prefer=str(prefer))),
+        ])
     else:
         mode = "CLR" if norm_up == "CLR" else "LOG10"
-        micro_pipe = SkPipeline(
-            steps=[
-                (
-                    "imputer",
-                    SafeSimpleImputer(strategy="constant", fill_value=0),
-                ),  # int 0
-                ("norm", MicrobiomeNormalizer(mode=mode)),
-                (
-                    "dedup",
-                    CLRRedundancyFilter(
-                        corr_threshold=float(corr_threshold), prefer=str(prefer)
-                    ),
-                ),
-            ]
-        )
-
+        micro_pipe = SkPipeline([
+            ("imputer", SafeSimpleImputer(strategy="constant", fill_value=0)),
+            ("norm", MicrobiomeNormalizer(mode=mode)),
+            ("dedup", CLRRedundancyFilter(corr_threshold=float(corr_threshold), prefer=str(prefer))),
+        ])
     cov_pipe = SkPipeline(
         steps=[
             ("imputer", SafeSimpleImputer(strategy="median")),
             ("scaler", SafeStandardScaler()),
         ]
     )
-
     preprocessor = ColumnTransformer(
         transformers=[
             ("microbiome", micro_pipe, list(micro_cols)),
