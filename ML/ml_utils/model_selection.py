@@ -333,10 +333,15 @@ def tune_or_fit_inner(
     pipe = make_pipe(pre, estimator_adj, seed=args.seed, use_smote=args.use_smote)
 
     inner_splits_raw = list(inner_cv.split(X_tr, y_tr, groups_tr))
+    def _ok_counts(y):
+        _, c = np.unique(y, return_counts=True)
+        return c.min() >= 2
+
+    inner_splits_raw = list(inner_cv.split(X_tr, y_tr, groups_tr))
     filtered_splits = [
-        (tr_f, va_f)
-        for tr_f, va_f in inner_splits_raw
+        (tr_f, va_f) for tr_f, va_f in inner_splits_raw
         if np.unique(y_tr[tr_f]).size >= 2 and np.unique(y_tr[va_f]).size >= 2
+        and _ok_counts(y_tr[tr_f]) and _ok_counts(y_tr[va_f])
     ]
 
     if (len(filtered_splits) == 0) or (X_tr.shape[0] < 2 * inner_cv.n_splits) or (not param_grid_adj):
@@ -353,8 +358,12 @@ def tune_or_fit_inner(
         refit=True,
         verbose=0,
     )
-    gs.fit(X_tr, y_tr)
-    return gs.best_estimator_, gs
+    try:
+        gs.fit(X_tr, y_tr)
+        return gs.best_estimator_, gs
+    except Exception:
+        pipe.fit(X_tr, y_tr)
+        return pipe, None
 
 
 def run_nested_cv_and_eval(
@@ -441,7 +450,8 @@ def run_nested_cv_and_eval(
                 est.fit(X_tr, y_tr)
 
 
-            last_search_obj = search_obj
+            if search_obj is not None:
+                last_search_obj = search_obj
             custom_score_fold = float(custom_scorer(est, X_va, y_va))
             custom_scores.append(custom_score_fold)
             proba = est.predict_proba(X_va) if hasattr(est, "predict_proba") else None
@@ -925,8 +935,8 @@ def parse_args():
     p.add_argument("--exclude-cols", nargs="*", default=[], help="Columns to exclude")
     p.add_argument(
         "--norm",
-        choices=["log10", "CLR", "DEICODE"],
-        default="log10",
+        choices=["log10", "CLR", "DEICODE", "NONE"],
+        default="NONE",
         help="Normalization mode",
     )
     p.add_argument("--outer-folds", type=int, default=5)

@@ -54,13 +54,13 @@ _HYPERPARAM_DISTS = {
         "model__max_features": ["sqrt", None],
     },
     "HistGradientBoosting": {
-        "model__max_iter": [300, 600],
+        "model__max_iter": [300, 500],
         "model__learning_rate": [0.03, 0.1],
         "model__max_depth": [None, 3, 6],
         "model__l2_regularization": [0.0, 0.1, 1.0],
         "model__min_samples_leaf": [10, 20, 30],
         "model__max_leaf_nodes": [15, 31, 63],
-        "model__early_stopping": [True],
+        "model__early_stopping": [False],
     },
     "KNN": {
         "model__n_neighbors": [3, 5, 7],
