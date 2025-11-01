@@ -11,6 +11,7 @@ This repository contains a pipeline for classification from a tabular data with 
 -   [CLI arguments](#cli-arguments)
 -   [How to run](#how-to-run)
 -   [Outputs](#outputs)
+-   [R Scripts](#r-scripts)
 
 ## Environment
 
@@ -31,7 +32,13 @@ You can choose models and hyperparametrs in ml_utils/models.py.
 
 ```
 ngs_qpcr_pub/
+├─ datasets/                    # studied datasets
+├─ R/
+|  ├─ spearman_boxplot.R        # correlation analysis and abundance comparison 
+|  ├─ statistics_pipeline.R     # multivariate statistics workflow
+|  └─ nmds_3d/                  # interactive 3D NDMS plots
 └─ ML/
+   ├─ ML_testing_subsets.txt    # 43 subsets of data
    ├─ requirements.txt          # install this
    └─ ml_utils/
       ├─ models.py              # list of classifiers + hyperparam grids
@@ -110,3 +117,31 @@ For each input CSV, an output folder is created under `--output-root/<file_stem>
 - feature importance / SHAP top-20 CSVs; optional DEICODE loadings;
 - LOO accuracy summary.
 
+## R Scripts
+
+Executable R code for multivariate statistics and correlation analysis is provided in the `R` subfolder.
+
+**Key features**:  
+- All required packages are automatically installed on first execution.  
+- No command-line arguments are needed — the pipeline automatically processes predefined datasets located in the `datasets` folder.  
+- To run: `Rscript {script_name.R}` from the project root. Output will be generated in the current working directory.  
+- **Prerequisite**: the `datasets` folder must be present in the same working directory as the script.
+
+### statistics_pipeline.R
+
+This script executes a comprehensive, end-to-end statistical and exploratory analysis of microbiome data, integrating multivariate testing, ordination, correlation, and diagnostic visualization in a single automated workflow.
+
+**Performed analyses**:  
+- Multivariate group comparison: PERMANOVA, MANCOVA, multivariate normality assessment  
+- Ordination: PCoA, dbRDA, NMDS  
+- Spearman rank correlation  
+- Diagnostic and visualization: boxplots, ordination biplots, taxonomic composition profiles, etc.
+
+### spearman_boxplot.R
+
+Independent script for conducting Spearman rank correlation analysis with FDR adjustment between specified taxa across microbiome datasets, producing comprehensive result tables and tailored boxplots of absolute abundances.
+
+**Key features**:  
+- Automatic taxon matching by nomenclature across input files; no predefined datasets required.  
+- Generates detailed correlation matrices (ρ, p-values, q-values) and publication-quality boxplots with statistical annotations.  
+- Highly adaptable: user-defined data paths and taxon list enable application to external datasets.
